@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="สำรวจสินค้า">
+<meta name="theme-color" content="#0d0f14">
+<meta name="mobile-web-app-capable" content="yes">
+<title>สำรวจสินค้า</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+  const firebaseConfig = {
+    apiKey: "AIzaSyCuwf2lyP5BjHKq9WwpXQEkz6re-SUOmig",
+    authDomain: "product-ap.firebaseapp.com",
+    projectId: "product-ap",
+    storageBucket: "product-ap.firebasestorage.app",
+    messagingSenderId: "334664351058",
+    appId: "1:334664351058:web:176a05410d3516aef3ce8b"
+  };
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  window.__db = db;
+  window.__fs = { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy };
+  window.__dbReady = true;
+  window.dispatchEvent(new Event("dbReady"));
+</script>
+<script>
+const swCode=`const CACHE="product-v2";self.addEventListener("install",e=>self.skipWaiting());self.addEventListener("activate",e=>self.clients.claim());self.addEventListener("fetch",e=>{if(e.request.url.includes("firebase")||e.request.url.includes("gstatic")||e.request.url.includes("cdnjs"))return;e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));});`;
+if('serviceWorker' in navigator){const b=new Blob([swCode],{type:'text/javascript'});navigator.serviceWorker.register(URL.createObjectURL(b)).catch(()=>{});}
+const mf={name:"สำรวจสินค้า",short_name:"สินค้า",start_url:"/",display:"standalone",background_color:"#0d0f14",theme_color:"#0d0f14"};
+const ml=document.createElement('link');ml.rel='manifest';ml.href=URL.createObjectURL(new Blob([JSON.stringify(mf)],{type:'application/json'}));document.head.appendChild(ml);
+</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overflow:hidden;}
+body{background:#0d0f14;overscroll-behavior:none;}
+#root{height:100%;display:flex;flex-direction:column;}
+input,textarea,select,button{font-family:system-ui,sans-serif;}
+input[type=number]{-moz-appearance:textfield;}
+input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0;}
+.sa{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+.nt{padding-top:env(safe-area-inset-top,0px);}
+.nb{padding-bottom:env(safe-area-inset-bottom,0px);}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const {useState,useEffect,useRef,useCallback,useMemo}=React;
+
+const C={bg:"#0d0f14",surface:"#151820",surface2:"#1c2030",border:"#252b40",accent:"#f5a623",accent2:"#ff6b35",text:"#e8ecf4",muted:"#6b7599",profit:"#34d399",loss:"#f87171",info:"#60a5fa",purple:"#a78bfa",orange:"#fb923c"};
+const CURR=[{code:"THB",symbol:"฿",name:"บาท"},{code:"CNY",symbol:"¥",name:"หยวน"},{code:"LAK",symbol:"₭",name:"กีบ"}];
+const CATS=["แฟชั่น / เครื่องแต่งกาย","กระเป๋า / เครื่องประดับ","อิเล็กทรอนิกส์","ของใช้ในบ้าน","ความงาม / สุขภาพ","อาหาร / เครื่องดื่ม","สัตว์เลี้ยง / Pet","อื่นๆ"];
+const ORIGINS=["ไทย 🇹🇭","จีน 🇨🇳","อื่นๆ"];
+const ORDER_STATUS=[
+  {key:"pending",label:"ยังไม่ได้สั่ง",color:"#6b7599",icon:"⏳"},
+  {key:"ordered",label:"สั่งแล้ว",color:"#60a5fa",icon:"📦"},
+  {key:"arrived",label:"สินค้าถึงแล้ว",color:"#34d399",icon:"✅"},
+];
+
+const pc=v=>v>0?C.profit:v<0?C.loss:C.muted;
+const fmt=(n,s)=>(s||"฿")+Number(n||0).toFixed(2);
+const fmtS=(n,s)=>(s||"฿")+Number(n||0).toFixed(0);
+const IS={width:"100%",background:C.surface2,border:"1px solid "+C.border,borderRadius:10,color:C.text,fontSize:15,padding:"10px 13px",outline:"none",boxSizing:"border-box",WebkitAppearance:"none"};
+
+function calcP(b,sh,se,fp){const fee=se*(fp/100),cost=b+sh+fee,profit=se-cost;return{cost,profit,margin:se>0?(profit/se*100):0};}
+function calcSell(cost,pct){return pct>=100?0:cost/(1-pct/100);}
+
+let dp=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();dp=e;window.dispatchEvent(new Event('pwaR'));});
+
+function NumInput({sym,placeholder,defaultValue,onChange}){
+  const ref=useRef();
+  const timer=useRef();
+  const handleChange=useCallback(e=>{
+    clearTimeout(timer.current);
+    timer.current=setTimeout(()=>onChange(parseFloat(e.target.value)||0),300);
+  },[onChange]);
+  useEffect(()=>{if(ref.current)ref.current.value=defaultValue||"";},[defaultValue]);
+  return React.createElement("div",{style:{position:"relative"}},
+    React.createElement("span",{style:{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",fontSize:12,fontWeight:700,color:C.muted,pointerEvents:"none"}},sym||"฿"),
+    React.createElement("input",{ref,type:"number",inputMode:"decimal",min:"0",step:"any",placeholder:placeholder||"0",defaultValue:defaultValue||"",onChange:handleChange,style:Object.assign({},IS,{paddingLeft:38})})
+  );
+}
+
+function StatusBadge({status,small}){
+  const st=ORDER_STATUS.find(s=>s.key===status)||ORDER_STATUS[0];
+  return React.createElement("span",{style:{display:"inline-flex",alignItems:"center",gap:4,background:st.color+"22",border:"1px solid "+st.color+"55",borderRadius:100,padding:small?"2px 7px":"4px 10px",fontSize:small?9:11,fontWeight:600,color:st.color}},st.icon," ",st.label);
+}
+
+function App(){
+  const [tab,setTab]=useState("form");
+  const [prods,setPr]=useState([]);
+  const [loading,setLd]=useState(true);
+  const [syncing,setSy]=useState(false);
+  const [toast,setTst]=useState({show:false,msg:"",warn:false});
+  const [modal,setMod]=useState(null);
+  const [editId,setEd]=useState(null);
+  const [search,setSch]=useState("");
+  const [dbReady,setDbR]=useState(false);
+  const [iosHint,setIosH]=useState(false);
+  const [listCat,setLC]=useState("ทั้งหมด"); // category filter for list
+  const [listOrigin,setLO]=useState("ทั้งหมด"); // origin filter
+
+  // Form text fields
+  const [imgs,setImgs]=useState([]);
+  const [name,setName]=useState("");
+  const [cat,setCat]=useState("");
+  const [currency,setCur]=useState("THB");
+  const [inputter,setInp]=useState("");
+  const [origin,setOrigin]=useState("ไทย 🇹🇭");
+  const [orderStatus,setOS]=useState("pending");
+  const [marginMode,setMM]=useState(false);
+  const [notes,setNts]=useState("");
+  const [drag,setDrag]=useState(false);
+
+  const nums=useRef({buy:0,ship:0,sell:0,fee:0,tm:0});
+  const [profitBox,setPB]=useState({cost:0,profit:0,margin:0,sellN:0,tmSell:""});
+  const [formKey,setFK]=useState(0);
+
+  const fileRef=useRef();
+  const unsubRef=useRef();
+
+  const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone=window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone;
+  const curSym=CURR.find(c=>c.code===currency)?.symbol||"฿";
+
+  const recalc=useCallback(()=>{
+    const{buy:b,ship:sh,sell:se,fee:fp,tm}=nums.current;
+    const sellN=marginMode?calcSell(b+sh,tm):se;
+    const pd=calcP(b,sh,sellN,fp);
+    setPB({...pd,sellN,tmSell:marginMode&&tm>0?fmt(sellN,curSym):""});
+  },[marginMode,curSym]);
+
+  useEffect(()=>{recalc();},[marginMode,currency]);
+
+  useEffect(()=>{
+    const setup=()=>{
+      setDbR(true);
+      const{onSnapshot,collection,query,orderBy}=window.__fs;
+      const q=query(collection(window.__db,"products"),orderBy("savedAt","desc"));
+      unsubRef.current=onSnapshot(q,snap=>{
+        setPr(snap.docs.map(d=>({...d.data(),_docId:d.id})));
+        setLd(false);
+      },()=>{setLd(false);toast_("⚠️ Firebase ไม่ได้",true);});
+    };
+    if(window.__dbReady) setup();
+    else window.addEventListener("dbReady",setup,{once:true});
+    return()=>{if(unsubRef.current)unsubRef.current();};
+  },[]);
+
+  useEffect(()=>{
+    if(dp){}
+    window.addEventListener('pwaR',()=>{});
+  },[]);
+
+  const toast_=(msg,warn)=>{setTst({show:true,msg,warn:!!warn});setTimeout(()=>setTst(t=>({...t,show:false})),2800);};
+
+  const installApp=async()=>{
+    if(isIOS){setIosH(true);return;}
+    if(!dp)return;
+    dp.prompt();
+    const{outcome}=await dp.userChoice;
+    if(outcome==='accepted')toast_("✅ ติดตั้งแอปสำเร็จ!");
+    dp=null;
+  };
+
+  const handleFiles=files=>Array.from(files).forEach(f=>{
+    if(!f.type.startsWith("image/"))return;
+    const r=new FileReader();
+    r.onload=e=>setImgs(p=>[...p,{id:Date.now()+Math.random(),src:e.target.result}]);
+    r.readAsDataURL(f);
+  });
+
+  const reset=()=>{
+    nums.current={buy:0,ship:0,sell:0,fee:0,tm:0};
+    setImgs([]);setName("");setCat("");setCur("THB");setInp("");
+    setOrigin("ไทย 🇹🇭");setOS("pending");setMM(false);setNts("");setEd(null);
+    setPB({cost:0,profit:0,margin:0,sellN:0,tmSell:""});
+    setFK(k=>k+1);
+  };
+
+  const saveProd=async()=>{
+    if(!name.trim()){toast_("⚠️ กรุณากรอกชื่อสินค้า",true);return;}
+    if(!dbReady){toast_("⚠️ ยังเชื่อมต่อไม่ได้",true);return;}
+    setSy(true);
+    try{
+      const{cost,profit,margin,sellN}=profitBox;
+      const{buy:b,ship:sh,fee:fp}=nums.current;
+      const item={
+        name:name.trim(),category:cat,currency,inputter:inputter.trim(),
+        origin,orderStatus,
+        buyPrice:b,shippingCost:sh,sellPrice:sellN,platformFee:fp,
+        totalCost:cost,profit,margin,notes:notes.trim(),
+        images:imgs.map(i=>i.src),savedAt:new Date().toISOString()
+      };
+      const{collection,addDoc,updateDoc,doc}=window.__fs;
+      if(editId){await updateDoc(doc(window.__db,"products",editId),item);toast_("✏️ แก้ไขเรียบร้อย!");}
+      else{await addDoc(collection(window.__db,"products"),item);toast_("✅ บันทึกสินค้าเรียบร้อย!");}
+      reset();
+    }catch{toast_("⚠️ บันทึกไม่สำเร็จ",true);}
+    setSy(false);
+  };
+
+  const editProd=p=>{
+    nums.current={buy:p.buyPrice,ship:p.shippingCost,sell:p.sellPrice,fee:p.platformFee,tm:0};
+    setEd(p._docId);setName(p.name);setCat(p.category||"");setCur(p.currency||"THB");
+    setInp(p.inputter||"");setOrigin(p.origin||"ไทย 🇹🇭");setOS(p.orderStatus||"pending");
+    setMM(false);setNts(p.notes||"");
+    setImgs((p.images||[]).map(src=>({id:Date.now()+Math.random(),src})));
+    const pd=calcP(p.buyPrice,p.shippingCost,p.sellPrice,p.platformFee);
+    setPB({...pd,sellN:p.sellPrice,tmSell:""});
+    setFK(k=>k+1);setTab("form");toast_("✏️ แก้ไขข้อมูลสินค้า");
+    const quickUpdateStatus=async(p,newStatus,e)=>{
+    e.stopPropagation();
+    try{
+      const{updateDoc,doc}=window.__fs;
+      await updateDoc(doc(window.__db,"products",p._docId),{orderStatus:newStatus});
+      toast_("✅ อัปเดตสถานะแล้ว");
+    }catch{toast_("⚠️ อัปเดตไม่สำเร็จ",true);}
+  };
+
+  const delProd=async id=>{
+    if(!confirm("ยืนยันการลบสินค้านี้?"))return;
+    try{const{deleteDoc,doc}=window.__fs;await deleteDoc(doc(window.__db,"products",id));toast_("🗑️ ลบเรียบร้อย");}
+    catch{toast_("⚠️ ลบไม่สำเร็จ",true);}
+  };
+
+  // Filtered list
+  const filtered=useMemo(()=>{
+    return prods.filter(p=>{
+      const matchSearch=p.name.toLowerCase().includes(search.toLowerCase());
+      const matchCat=listCat==="ทั้งหมด"||(p.category||"")=== listCat;
+      const matchOrigin=listOrigin==="ทั้งหมด"||(p.origin||"")=== listOrigin;
+      return matchSearch&&matchCat&&matchOrigin;
+    });
+  },[prods,search,listCat,listOrigin]);
+
+  // Summary data
+  const summary=useMemo(()=>{
+    const total=prods.length;
+    const byStatus={pending:0,ordered:0,arrived:0};
+    const byOrigin={};
+    const byOriginCost={};
+    const byCurrency={};
+    let totalProfit=0;
+    prods.forEach(p=>{
+      byStatus[p.orderStatus||"pending"]=(byStatus[p.orderStatus||"pending"]||0)+1;
+      const org=p.origin||"ไม่ระบุ";
+      byOrigin[org]=(byOrigin[org]||0)+1;
+      const sym=CURR.find(c=>c.code===p.currency)?.symbol||"฿";
+      if(!byOriginCost[org]) byOriginCost[org]={};
+      byOriginCost[org][sym]=(byOriginCost[org][sym]||0)+p.totalCost;
+      byCurrency[sym]=(byCurrency[sym]||0)+p.profit;
+      totalProfit+=p.profit;
+    });
+    return{total,byStatus,byOrigin,byOriginCost,byCurrency,totalProfit};
+  },[prods]);
+
+  const allCats=["ทั้งหมด",...new Set(prods.map(p=>p.category||"ไม่ระบุ").filter(Boolean))];
+  const allOrigins=["ทั้งหมด",...new Set(prods.map(p=>p.origin||"ไม่ระบุ"))];
+
+  const cardS={background:C.surface,border:"1px solid "+C.border,borderRadius:18,padding:"20px 18px",marginBottom:14,position:"relative",overflow:"hidden"};
+  const lineS={position:"absolute",top:0,left:0,right:0,height:1,background:"linear-gradient(90deg,transparent,"+C.accent+",transparent)",opacity:.3};
+  const ST=(icon,label)=>React.createElement("div",{style:{fontSize:11,fontWeight:700,color:C.accent,letterSpacing:"1.5px",textTransform:"uppercase",marginBottom:16,display:"flex",alignItems:"center",gap:8}},icon+" "+label,React.createElement("span",{style:{flex:1,height:1,background:C.border,display:"block"}}));
+  const TBtn=({a,o,l,c})=>React.createElement("button",{onClick:o,style:{flex:1,padding:"9px",borderRadius:10,fontSize:13,fontWeight:600,cursor:"pointer",border:a?"1px solid "+(c||C.accent):"1px solid "+C.border,background:a?"rgba(245,166,35,0.1)":C.surface2,color:a?(c||C.accent):C.muted}},l);
+  const FLabel=({t,req})=>React.createElement("label",{style:{display:"block",fontSize:12,fontWeight:600,color:C.muted,marginBottom:5}},t,req&&React.createElement("span",{style:{color:C.accent2}}," *"));
+
+  // Scroll filter chips
+  const FilterChips=({options,value,onChange,color})=>React.createElement("div",{style:{display:"flex",gap:7,overflowX:"auto",paddingBottom:4,WebkitOverflowScrolling:"touch"}},
+    options.map(o=>React.createElement("button",{key:o,onClick:()=>onChange(o),style:{
+      flexShrink:0,padding:"5px 12px",borderRadius:100,fontSize:12,fontWeight:600,cursor:"pointer",
+      border:value===o?"1px solid "+(color||C.accent):"1px solid "+C.border,
+      background:value===o?"rgba(245,166,35,0.1)":C.surface2,
+      color:value===o?(color||C.accent):C.muted,whiteSpace:"nowrap"
+    }},o))
+  );
+
+  const TabBar=()=>React.createElement("div",{className:"nb",style:{background:"rgba(13,15,20,0.97)",borderTop:"1px solid "+C.border,display:"flex",flexShrink:0}},
+    [["form","➕","เพิ่ม"],["list","📋","รายการ"],["summary","📊","สรุป"]].map(([t,icon,label])=>
+      React.createElement("button",{key:t,onClick:()=>setTab(t),style:{flex:1,padding:"10px 8px 8px",border:"none",background:"transparent",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,color:tab===t?C.accent:C.muted,borderTop:tab===t?"2px solid "+C.accent:"2px solid transparent"}},
+        React.createElement("span",{style:{fontSize:20}},icon),
+        React.createElement("span",{style:{fontSize:10,fontWeight:600}},label)
+      )
+    )
+  );
+
+  return React.createElement("div",{style:{height:"100%",display:"flex",flexDirection:"column",background:C.bg,color:C.text,fontFamily:"system-ui,sans-serif"}},
+
+    // NAV
+    React.createElement("div",{className:"nt",style:{background:"rgba(13,15,20,0.97)",borderBottom:"1px solid "+C.border,padding:"12px 16px 10px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}},
+      React.createElement("div",{style:{display:"flex",alignItems:"center",gap:8}},
+        React.createElement("div",{style:{fontWeight:800,fontSize:18,background:"linear-gradient(135deg,#fff 30%,"+C.accent+")",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}},"📦 สำรวจสินค้า"),
+        React.createElement("div",{style:{width:7,height:7,borderRadius:"50%",background:dbReady?C.profit:C.loss}})
+      ),
+      !isStandalone&&React.createElement("button",{onClick:installApp,style:{padding:"6px 12px",borderRadius:20,fontSize:12,fontWeight:700,cursor:"pointer",border:"none",background:"linear-gradient(135deg,"+C.accent+","+C.accent2+")",color:"#0d0f14"}},"⬇️ ติดตั้ง")
+    ),
+
+    iosHint&&React.createElement("div",{style:{background:"rgba(245,166,35,0.12)",borderBottom:"1px solid rgba(245,166,35,0.3)",padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}},
+      React.createElement("span",{style:{fontSize:13,color:C.accent}},"กด Share 📤 → Add to Home Screen"),
+      React.createElement("button",{onClick:()=>setIosH(false),style:{background:"transparent",border:"none",color:C.muted,fontSize:18,cursor:"pointer"}},"×")
+    ),
+
+    // CONTENT
+    React.createElement("div",{className:"sa",style:{backgroundImage:"radial-gradient(ellipse 80% 40% at 50% -10%,rgba(245,166,35,0.07) 0%,transparent 60%)"}},
+
+      // ===== FORM =====
+      tab==="form"&&React.createElement("div",{key:formKey,style:{padding:"16px 16px 24px",maxWidth:780,margin:"0 auto"}},
+
+        React.createElement("div",{style:cardS},
+          React.createElement("div",{style:lineS}),
+          ST("🖼","รูปภาพสินค้า"),
+          React.createElement("div",{style:{border:"2px dashed "+(drag?C.accent:C.border),borderRadius:12,padding:"20px",textAlign:"center",cursor:"pointer",background:drag?"rgba(245,166,35,0.04)":C.surface2},
+            onDragOver:e=>{e.preventDefault();setDrag(true)},onDragLeave:()=>setDrag(false),
+            onDrop:e=>{e.preventDefault();setDrag(false);handleFiles(e.dataTransfer.files)},onClick:()=>fileRef.current.click()},
+            React.createElement("input",{ref:fileRef,type:"file",accept:"image/*",multiple:true,style:{display:"none"},onChange:e=>handleFiles(e.target.files)}),
+< truncated lines 325-336 >
+        ),
+
+        React.createElement("div",{style:cardS},
+          React.createElement("div",{style:lineS}),
+          ST("📋","ข้อมูลสินค้า"),
+          React.createElement("div",{style:{marginBottom:14}},
+            React.createElement(FLabel,{t:"ชื่อผู้ป้อนข้อมูล"}),
+            React.createElement("input",{value:inputter,onChange:e=>setInp(e.target.value),placeholder:"เช่น สมชาย, อ้อย...",style:IS})
+          ),
+          React.createElement("div",{style:{marginBottom:14}},
+            React.createElement(FLabel,{t:"ชื่อสินค้า",req:true}),
+            React.createElement("input",{value:name,onChange:e=>setName(e.target.value),placeholder:"เช่น กระเป๋าหนัง PU สีดำ",style:IS})
+          ),
+          React.createElement("div",{style:{marginBottom:14}},
+            React.createElement(FLabel,{t:"หมวดหมู่"}),
+            React.createElement("select",{value:cat,onChange:e=>setCat(e.target.value),style:IS},
+              React.createElement("option",{value:""},"เลือกหมวดหมู่..."),
+              CATS.map(c=>React.createElement("option",{key:c,value:c},c))
+            )
+          ),
+          React.createElement("div",{style:{marginBottom:14}},
+            React.createElement(FLabel,{t:"สั่งจากประเทศ"}),
+            React.createElement("div",{style:{display:"flex",gap:7}},
+              ORIGINS.map(o=>React.createElement("button",{key:o,onClick:()=>setOrigin(o),style:{flex:1,padding:"9px 6px",borderRadius:9,fontSize:13,fontWeight:600,cursor:"pointer",border:origin===o?"1px solid "+C.accent:"1px solid "+C.border,background:origin===o?"rgba(245,166,35,0.1)":C.surface2,color:origin===o?C.accent:C.muted}},o))
+            )
+          ),
+          React.createElement("div",{style:{marginBottom:14}},
+            React.createElement(FLabel,{t:"สถานะการสั่งซื้อ"}),
+            React.createElement("div",{style:{display:"flex",gap:7}},
+              ORDER_STATUS.map(s=>React.createElement("button",{key:s.key,onClick:()=>setOS(s.key),style:{flex:1,padding:"8px 4px",borderRadius:9,fontSize:11,fontWeight:600,cursor:"pointer",border:orderStatus===s.key?"1px solid "+s.color:"1px solid "+C.border,background:orderStatus===s.key?s.color+"22":C.surface2,color:orderStatus===s.key?s.color:C.muted,display:"flex",flexDirection:"column",alignItems:"center",gap:2}},
+                React.createElement("span",{style:{fontSize:16}},s.icon),s.label))
+            )
+          ),
+          React.createElement("div",null,
+            React.createElement(FLabel,{t:"สกุลเงิน"}),
+            React.createElement("div",{style:{display:"flex",gap:7}},
+              CURR.map(cur=>React.createElement("button",{key:cur.code,onClick:()=>setCur(cur.code),style:{flex:1,padding:"9px 6px",borderRadius:9,fontSize:13,fontWeight:600,cursor:"pointer",border:currency===cur.code?"1px solid "+C.accent:"1px solid "+C.border,background:currency===cur.code?"rgba(245,166,35,0.1)":C.surface2,color:currency===cur.code?C.accent:C.muted}},cur.symbol+" "+cur.name))
+            )
+          )
+        ),
+
+        React.createElement("div",{style:cardS},
+          React.createElement("div",{style:lineS}),
+          ST("💰","ราคา & ต้นทุน"),
+          React.createElement("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}},
+            React.createElement("div",null,React.createElement(FLabel,{t:"ราคาซื้อ / ต้นทุน",req:true}),React.createElement(NumInput,{sym:curSym,defaultValue:nums.current.buy||"",onChange:v=>{nums.current.buy=v;recalc();}})),
+            React.createElement("div",null,React.createElement(FLabel,{t:"ค่าขนส่ง"}),React.createElement(NumInput,{sym:curSym,defaultValue:nums.current.ship||"",onChange:v=>{nums.current.ship=v;recalc();}})),
+            React.createElement("div",null,React.createElement(FLabel,{t:"ค่าธรรมเนียม (%)"}),React.createElement(NumInput,{sym:"%",defaultValue:nums.current.fee||"",onChange:v=>{nums.current.fee=v;recalc();}}))
+          ),
+          React.createElement("div",{style:{marginTop:14,marginBottom:12}},
+            React.createElement(FLabel,{t:"วิธีกำหนดราคาขาย"}),
+            React.createElement("div",{style:{display:"flex",gap:8}},
+              React.createElement(TBtn,{a:!marginMode,o:()=>setMM(false),l:"กำหนดเอง"}),
+              React.createElement(TBtn,{a:marginMode,o:()=>setMM(true),l:"คำนวณจาก %"})
+            )
+          ),
+          !marginMode
+            ? React.createElement("div",null,React.createElement(FLabel,{t:"ราคาขาย",req:true}),React.createElement(NumInput,{sym:curSym,defaultValue:nums.current.sell||"",onChange:v=>{nums.current.sell=v;recalc();}}))
+            : React.createElement("div",null,
+                React.createElement(FLabel,{t:"% กำไรที่ต้องการ"}),
+                React.createElement(NumInput,{sym:"%",defaultValue:nums.current.tm||"",onChange:v=>{nums.current.tm=v;recalc();}}),
+                profitBox.tmSell&&React.createElement("div",{style:{marginTop:6,fontSize:13,color:C.accent}},"→ ราคาขาย: "+profitBox.tmSell)
+              ),
+          React.createElement("div",{style:{background:C.surface2,border:"1px solid "+C.border,borderRadius:13,padding:"14px 16px",marginTop:14}},
+            React.createElement("div",{style:{fontSize:11,fontWeight:700,color:C.muted,letterSpacing:"1px",textTransform:"uppercase",marginBottom:11}},"📊 สรุปกำไร"),
+            [["ราคาขาย",fmt(profitBox.sellN,curSym)],["ต้นทุนรวม",fmt(profitBox.cost,curSym)]].map(([l,v])=>
+              React.createElement("div",{key:l,style:{display:"flex",justifyContent:"space-between",fontSize:14,marginBottom:7}},React.createElement("span",{style:{color:C.muted}},l),React.createElement("span",{style:{fontWeight:600}},v))),
+            React.createElement("div",{style:{height:1,background:C.border,margin:"5px 0"}}),
+            React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}},
+              React.createElement("span",{style:{fontWeight:700,fontSize:15}},"กำไรสุทธิ"),
+              React.createElement("span",{style:{fontWeight:700,fontSize:20,color:pc(profitBox.profit)}},fmt(profitBox.profit,curSym))),
+            React.createElement("div",{style:{display:"flex",justifyContent:"space-between",fontSize:13}},
+              React.createElement("span",{style:{color:C.muted}},"อัตรากำไร"),React.createElement("span",{style:{fontWeight:600,color:pc(profitBox.profit)}},profitBox.margin.toFixed(1)+"%"))
+          )
+        ),
+
+        React.createElement("div",{style:cardS},
+          React.createElement("div",{style:lineS}),
+          ST("📝","หมายเหตุ"),
+          React.createElement("textarea",{value:notes,onChange:e=>setNts(e.target.value),placeholder:"แหล่งที่มา, คุณภาพ, คู่แข่ง...",style:Object.assign({},IS,{minHeight:80,lineHeight:1.6,resize:"vertical"})}),
+          React.createElement("div",{style:{display:"flex",gap:10,marginTop:16}},
+            React.createElement("button",{onClick:reset,style:{flex:1,padding:"12px",borderRadius:11,fontSize:14,fontWeight:600,cursor:"pointer",border:"1px solid "+C.border,background:"transparent",color:C.muted}},"🔄 ล้างข้อมูล"),
+            React.createElement("button",{onClick:saveProd,style:{flex:1,padding:"12px",borderRadius:11,fontSize:14,fontWeight:600,cursor:"pointer",border:"none",background:"linear-gradient(135deg,"+C.accent+","+C.accent2+")",color:"#0d0f14"}},syncing?"⏳ กำลังบันทึก...":"✅ บันทึกสินค้า")
+          )
+        )
+      ),
+
+      // ===== LIST =====
+      tab==="list"&&React.createElement("div",{style:{padding:"16px 16px 24px",maxWidth:780,margin:"0 auto"}},
+        React.createElement("div",{style:{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}},
+          React.createElement("div",{style:{fontWeight:700,fontSize:20,background:"linear-gradient(135deg,#fff 30%,"+C.accent+")",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent"}},"รายการสินค้า"),
+          React.createElement("div",{style:{background:C.surface2,border:"1px solid "+C.border,borderRadius:100,padding:"3px 10px",fontSize:12,fontWeight:600,color:C.muted}},filtered.length+" รายการ")
+        ),
+
+        // Sync status
+        React.createElement("div",{style:{background:C.surface,border:"1px solid "+C.border,borderRadius:11,padding:"8px 13px",marginBottom:12,fontSize:12,display:"flex",alignItems:"center",gap:7}},
+          React.createElement("div",{style:{width:7,height:7,borderRadius:"50%",background:dbReady?C.profit:C.loss,flexShrink:0}}),
+          React.createElement("span",{style:{color:C.muted}},dbReady?"🔄 Real-time sync":"⚠️ กำลังเชื่อมต่อ...")
+        ),
+
+        // Search
+        React.createElement("div",{style:{position:"relative",marginBottom:10}},
+          React.createElement("span",{style:{position:"absolute",left:11,top:"50%",transform:"translateY(-50%)",fontSize:14}},"🔍"),
+          React.createElement("input",{value:search,onChange:e=>setSch(e.target.value),placeholder:"ค้นหาชื่อสินค้า...",style:Object.assign({},IS,{paddingLeft:35})})
+          ),
+
+        // Filter by category
+        React.createElement("div",{style:{marginBottom:8}},
+          React.createElement("div",{style:{fontSize:11,color:C.muted,marginBottom:6,fontWeight:600}},"หมวดหมู่"),
+          React.createElement(FilterChips,{options:allCats,value:listCat,onChange:setLC})
+        ),
+
+        // Filter by origin
+        React.createElement("div",{style:{marginBottom:14}},
+          React.createElement("div",{style:{fontSize:11,color:C.muted,marginBottom:6,fontWeight:600}},"ประเทศ"),
+          React.createElement(FilterChips,{options:allOrigins,value:listOrigin,onChange:setLO,color:C.info})
+        ),
+
+        loading
+          ? React.createElement("div",{style:{textAlign:"center",padding:"50px 20px",color:C.muted}},React.createElement("div",{style:{fontSize:30,marginBottom:10}},"⏳"),React.createElement("div",null,"กำลังโหลด..."))
+          : filtered.length===0
+            ? React.createElement("div",{style:{textAlign:"center",padding:"50px 20px",color:C.muted}},
+                React.createElement("div",{style:{fontSize:40,marginBottom:12,opacity:.5}},"📦"),
+                React.createElement("div",{style:{fontSize:15,marginBottom:5}},"ไม่พบสินค้า"),
+                React.createElement("div",{style:{fontSize:13,opacity:.6}},"ลองเปลี่ยนตัวกรอง")
+              )
+            : filtered.map(p=>{
+                const sym=CURR.find(c=>c.code===p.currency)?.symbol||"฿";
+                const pCol=pc(p.profit);
+                const date=new Date(p.savedAt).toLocaleDateString("th-TH",{day:"numeric",month:"short",year:"2-digit"});
+                const st=ORDER_STATUS.find(s=>s.key===(p.orderStatus||"pending"))||ORDER_STATUS[0];
+                const nextStatus={pending:"ordered",ordered:"arrived",arrived:"pending"};
+                return React.createElement("div",{key:p._docId,style:{background:C.surface,border:"1px solid "+C.border,borderRadius:14,overflow:"hidden",marginBottom:9,cursor:"pointer"},onClick:()=>setMod(p)},
+                  // Status bar on top
+                  React.createElement("div",{style:{background:st.color+"18",borderBottom:"1px solid "+st.color+"33",padding:"6px 12px",display:"flex",alignItems:"center",justifyContent:"space-between"}},
+                    React.createElement(StatusBadge,{status:p.orderStatus||"pending",small:true}),
+                    React.createElement("div",{style:{display:"flex",gap:6,alignItems:"center"}},
+                      p.origin&&React.createElement("span",{style:{fontSize:10,color:C.muted}},p.origin),
+                      React.createElement("button",{
+                        onClick:e=>quickUpdateStatus(p,nextStatus[p.orderStatus||"pending"],e),
+                        style:{padding:"3px 9px",borderRadius:100,fontSize:10,fontWeight:600,cursor:"pointer",border:"1px solid "+C.border,background:C.surface2,color:C.muted}
+                      },"เปลี่ยนสถานะ →")
+                    )
+                  ),
+                  React.createElement("div",{style:{display:"flex",alignItems:"stretch"}},
+                    React.createElement("div",{style:{width:72,minWidth:72,background:C.surface2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,overflow:"hidden"}},
+                      p.images&&p.images.length?React.createElement("img",{src:p.images[0],style:{width:"100%",height:"100%",objectFit:"cover"}}):"📦"),
+                    React.createElement("div",{style:{flex:1,padding:"10px 12px"}},
+                      React.createElement("div",{style:{fontWeight:700,fontSize:14,marginBottom:3}},p.name),
+                      React.createElement("div",{style:{display:"flex",gap:5,flexWrap:"wrap",marginBottom:5}},
+                        p.category&&React.createElement("span",{style:{fontSize:9,color:C.muted,background:C.surface2,padding:"2px 6px",borderRadius:100,border:"1px solid "+C.border}},p.category),
+                        p.inputter&&React.createElement("span",{style:{fontSize:9,color:C.info,background:"rgba(96,165,250,0.1)",padding:"2px 6px",borderRadius:100,border:"1px solid rgba(96,165,250,0.3)"}},"👤 "+p.inputter)
+                      ),
+                      React.createElement("div",{style:{display:"flex",gap:8,flexWrap:"wrap"}},
+                        [["ซื้อ",p.buyPrice],["ส่ง",p.shippingCost],["ขาย",p.sellPrice]].map(([l,v])=>
+                          React.createElement("span",{key:l,style:{fontSize:11}},React.createElement("span",{style:{color:C.muted}},l+" "),React.createElement("span",{style:{fontWeight:600}},sym+Math.round(v)))),
+                        React.createElement("span",{style:{fontSize:10,color:C.muted}},date)
+                      )
+                    ),
+                    React.createElement("div",{style:{padding:"10px 9px",display:"flex",flexDirection:"column",alignItems:"flex-end",justifyContent:"center",minWidth:68,borderLeft:"1px solid "+C.border}},
+                      React.createElement("div",{style:{fontWeight:700,fontSize:14,color:pCol,marginBottom:1}},sym+Math.round(p.profit)),
+                      React.createElement("div",{style:{fontSize:9,color:C.muted}},"กำไร"),
+                      React.createElement("div",{style:{fontSize:9,fontWeight:600,color:pCol}},p.margin.toFixed(1)+"%")
+                    ),
+                    React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:5,alignItems:"center",justifyContent:"center",padding:"0 6px",borderLeft:"1px solid "+C.border},onClick:e=>e.stopPropagation()},
+                      React.createElement("button",{onClick:()=>editProd(p),style:{background:"transparent",border:"1px solid "+C.border,borderRadius:7,width:28,height:28,cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}},"✏️"),
+                      React.createElement("button",{onClick:()=>delProd(p._docId),style:{background:"transparent",border:"1px solid "+C.border,borderRadius:7,width:28,height:28,cursor:"pointer",fontSize:12,display:"flex",alignItems:"center",justifyContent:"center"}},"🗑️")
+                    )
+                  )
+                );
+              })
+      ),
+
+      // ===== SUMMARY =====
+      tab==="summary"&&React.createElement("div",{style:{padding:"16px 16px 24px",maxWidth:780,margin:"0 auto"}},
+        React.createElement("div",{style:{fontWeight:700,fontSize:20,background:"linear-gradient(135deg,#fff 30%,"+C.accent+")",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",marginBottom:16}},"📊 สรุปภาพรวม"),
+
+        // Total stats
+        React.createElement("div",{style:{...cardS}},
+          React.createElement("div",{style:lineS}),
+          ST("📦","ภาพรวมทั้งหมด"),
+          React.createElement("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}},
+            [["สินค้าทั้งหมด",summary.total+" รายการ",C.info],
+             ["กำไรรวม (ประมาณ)",fmtS(summary.totalProfit),pc(summary.totalProfit)],
+            ].map(([l,v,c])=>React.createElement("div",{key:l,style:{background:C.surface2,borderRadius:12,padding:"14px 12px",textAlign:"center",border:"1px solid "+C.border}},
+              React.createElement("div",{style:{fontWeight:700,fontSize:18,color:c,marginBottom:3}},v),
+              React.createElement("div",{style:{fontSize:11,color:C.muted}},l)
+            ))
+          )
+        ),
+
+        // Status summary
+        React.createElement("div",{style:{...cardS}},
+          React.createElement("div",{style:lineS}),
+          ST("🚦","สถานะการสั่งซื้อ"),
+          React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:10}},
+            ORDER_STATUS.map(s=>React.createElement("div",{key:s.key,style:{display:"flex",alignItems:"center",justifyContent:"space-between",background:C.surface2,borderRadius:12,padding:"12px 16px",border:"1px solid "+s.color+"33"}},
+              React.createElement("div",{style:{display:"flex",alignItems:"center",gap:8}},
+                React.createElement("span",{style:{fontSize:20}},s.icon),
+< truncated lines 536-567 >
+        ),
+
+        // Profit by currency
+        React.createElement("div",{style:{...cardS}},
+          React.createElement("div",{style:lineS}),
+          ST("💰","กำไรแยกตามสกุลเงิน"),
+          Object.keys(summary.byCurrency).length===0
+            ? React.createElement("div",{style:{color:C.muted,fontSize:14,textAlign:"center",padding:"20px"}},"ยังไม่มีข้อมูล")
+            : React.createElement("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10}},
+                Object.entries(summary.byCurrency).map(([sym,profit])=>
+                  React.createElement("div",{key:sym,style:{background:C.surface2,borderRadius:12,padding:"14px 12px",textAlign:"center",border:"1px solid "+(profit>=0?C.profit+"44":C.loss+"44")}},
+                    React.createElement("div",{style:{fontSize:11,color:C.muted,marginBottom:4}},"กำไรรวม ("+sym+")"),
+                    React.createElement("div",{style:{fontWeight:700,fontSize:20,color:pc(profit)}},sym+Math.round(profit))
+                  )
+                )
+              )
+        ),
+
+        // Category breakdown
+        React.createElement("div",{style:{...cardS}},
+          React.createElement("div",{style:lineS}),
+          ST("🗂","แยกตามหมวดหมู่"),
+          (() => {
+            const byCat={};
+            prods.forEach(p=>{
+              const c=p.category||"ไม่ระบุ";
+              if(!byCat[c]) byCat[c]={count:0,profit:0};
+              byCat[c].count++;
+              byCat[c].profit+=p.profit;
+            });
+            return Object.keys(byCat).length===0
+              ? React.createElement("div",{style:{color:C.muted,fontSize:14,textAlign:"center",padding:"20px"}},"ยังไม่มีข้อมูล")
+              : React.createElement("div",{style:{display:"flex",flexDirection:"column",gap:8}},
+                  Object.entries(byCat).sort((a,b)=>b[1].count-a[1].count).map(([cat,{count,profit}])=>
+                    React.createElement("div",{key:cat,style:{display:"flex",justifyContent:"space-between",alignItems:"center",background:C.surface2,borderRadius:11,padding:"11px 14px",border:"1px solid "+C.border}},
+                      React.createElement("div",null,
+                        React.createElement("div",{style:{fontWeight:600,fontSize:13}},cat),
+                        React.createElement("div",{style:{fontSize:11,color:C.muted,marginTop:2}},count+" รายการ")
+                      ),
+                      React.createElement("div",{style:{textAlign:"right"}},
+                        React.createElement("div",{style:{fontWeight:700,fontSize:14,color:pc(profit)}},profit>=0?"+":"",Math.round(profit)),
+                        React.createElement("div",{style:{fontSize:10,color:C.muted}},"กำไรรวม")
+                      )
+                    )
+                  )
+                );
+          })()
+        )
+      )
+    ),
+
+    React.createElement(TabBar),
+
+    // MODAL
+    modal&&React.createElement("div",{style:{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",backdropFilter:"blur(4px)",zIndex:200,display:"flex",alignItems:"flex-end",justifyContent:"center"},onClick:e=>{if(e.target===e.currentTarget)setMod(null);}},
+      React.createElement("div",{className:"nb",style:{background:C.surface,borderRadius:"20px 20px 0 0",padding:"20px",width:"100%",maxWidth:600,maxHeight:"80vh",overflowY:"auto"}},
+        React.createElement("div",{style:{width:36,height:4,background:C.border,borderRadius:2,margin:"0 auto 16px"}}),
+        React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}},
+          React.createElement("div",{style:{fontWeight:700,fontSize:16}},modal.name),
+          React.createElement("button",{onClick:()=>setMod(null),style:{background:"transparent",border:"1px solid "+C.border,borderRadius:8,width:28,height:28,cursor:"pointer",color:C.muted,fontSize:14}},"✕")
+        ),
+        React.createElement(StatusBadge,{status:modal.orderStatus||"pending"}),
+        React.createElement("div",{style:{height:12}}),
+        modal.images&&modal.images.length>0&&React.createElement("div",{style:{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(65px,1fr))",gap:6,marginBottom:12}},
+          modal.images.map((src,i)=>React.createElement("div",{key:i,style:{borderRadius:8,overflow:"hidden",aspectRatio:"1",border:"1px solid "+C.border}},React.createElement("img",{src,style:{width:"100%",height:"100%",objectFit:"cover"}})))),
+        (()=>{
+          const sym=CURR.find(c=>c.code===modal.currency)?.symbol||"฿";
+          return React.createElement("div",null,
+            modal.inputter&&React.createElement("div",{style:{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid "+C.border,fontSize:13}},React.createElement("span",{style:{color:C.muted}},"ผู้ป้อนข้อมูล"),React.createElement("span",{style:{fontWeight:600,color:C.info}},"👤 "+modal.inputter)),
+            modal.origin&&React.createElement("div",{style:{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid "+C.border,fontSize:13}},React.createElement("span",{style:{color:C.muted}},"สั่งจากประเทศ"),React.createElement("span",{style:{fontWeight:600}},modal.origin)),
+            [["หมวดหมู่",modal.category||"—"],["สกุลเงิน",CURR.find(c=>c.code===modal.currency)?.name||"บาท"],
+             ["ราคาซื้อ",fmt(modal.buyPrice,sym)],["ค่าขนส่ง",fmt(modal.shippingCost,sym)],
+             ["ค่าธรรมเนียม ("+modal.platformFee+"%)",fmt(modal.sellPrice*modal.platformFee/100,sym)],
+             ["ต้นทุนรวม",fmt(modal.totalCost,sym)],["ราคาขาย",fmt(modal.sellPrice,sym)]
+            ].map(([l,v])=>React.createElement("div",{key:l,style:{display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid "+C.border,fontSize:13}},React.createElement("span",{style:{color:C.muted}},l),React.createElement("span",{style:{fontWeight:600}},v))),
+            React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 0",borderBottom:"1px solid "+C.border}},React.createElement("span",{style:{fontWeight:700,fontSize:14}},"กำไรสุทธิ"),React.createElement("span",{style:{fontWeight:700,fontSize:18,color:pc(modal.profit)}},fmt(modal.profit,sym))),
+            React.createElement("div",{style:{display:"flex",justifyContent:"space-between",padding:"8px 0",fontSize:13}},React.createElement("span",{style:{color:C.muted}},"อัตรากำไร"),React.createElement("span",{style:{fontWeight:600,color:pc(modal.profit)}},modal.margin.toFixed(2)+"%")),
+            modal.notes&&React.createElement("div",null,React.createElement("div",{style:{fontSize:11,color:C.muted,marginTop:8,marginBottom:4}},"หมายเหตุ"),React.createElement("div",{style:{background:C.surface2,border:"1px solid "+C.border,borderRadius:9,padding:"10px 12px",fontSize:13,lineHeight:1.6,color:C.muted}},modal.notes)),
+            React.createElement("div",{style:{display:"flex",gap:10,marginTop:14}},
+              React.createElement("button",{onClick:()=>{editProd(modal);setMod(null);},style:{flex:1,padding:"11px",borderRadius:10,fontSize:14,fontWeight:600,cursor:"pointer",border:"1px solid "+C.border,background:"transparent",color:C.muted}},"✏️ แก้ไข"),
+              React.createElement("button",{onClick:()=>setMod(null),style:{flex:1,padding:"11px",borderRadius:10,fontSize:14,fontWeight:600,cursor:"pointer",border:"1px solid "+C.border,background:"transparent",color:C.muted}},"ปิด"))
+          );
+        })()
+      )
+    ),
+
+    React.createElement("div",{style:{position:"fixed",bottom:80,left:"50%",transform:toast.show?"translateX(-50%) translateY(0)":"translateX(-50%) translateY(100px)",background:toast.warn?C.loss:C.profit,color:"#0d0f14",fontWeight:600,fontSize:13,padding:"10px 20px",borderRadius:100,transition:"transform 0.4s cubic-bezier(0.34,1.56,0.64,1)",zIndex:999,pointerEvents:"none",whiteSpace:"nowrap"}},toast.msg)
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+</script>
+</body>
+</html>
